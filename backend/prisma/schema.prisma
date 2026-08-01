@@ -1,0 +1,221 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── AUTH & USERS ────────────────────────────────────────────────────────────
+
+enum AuthProvider {
+  LOCAL
+  GOOGLE
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+model User {
+  id           String     @id @default(cuid())
+  fullname     String
+  email        String     @unique
+  password     String?
+  provider     AuthProvider @default(LOCAL)
+  googleId     String?    @unique @map("google_id")
+  avatarUrl    String?    @map("avatar_url")
+  status       UserStatus @default(ACTIVE)
+  createdAt    DateTime   @default(now()) @map("created_at")
+  updatedAt    DateTime   @updatedAt @map("updated_at")
+
+  employee     Employee?
+  roles        UserRole[]
+
+  @@map("users")
+}
+
+// ─── RBAC ────────────────────────────────────────────────────────────────────
+
+model Role {
+  id          String     @id @default(cuid())
+  name        String     @unique
+  description String?
+  createdAt   DateTime   @default(now()) @map("created_at")
+
+  users       UserRole[]
+  permissions RolePermission[]
+
+  @@map("roles")
+}
+
+model Permission {
+  id          String     @id @default(cuid())
+  action      String     // e.g. "create", "read", "update", "delete"
+  resource    String     // e.g. "products", "orders", "employees"
+  createdAt   DateTime   @default(now()) @map("created_at")
+
+  roles       RolePermission[]
+
+  @@unique([action, resource])
+  @@map("permissions")
+}
+
+model UserRole {
+  userId    String   @map("user_id")
+  roleId    String   @map("role_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role      Role     @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+  @@map("user_roles")
+}
+
+model RolePermission {
+  roleId       String     @map("role_id")
+  permissionId String     @map("permission_id")
+
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+// ─── ORGANIZATION ────────────────────────────────────────────────────────────
+
+model Department {
+  id          String     @id @default(cuid())
+  name        String     @unique
+  description String?
+  createdAt   DateTime   @default(now()) @map("created_at")
+  updatedAt   DateTime   @updatedAt @map("updated_at")
+
+  employees   Employee[]
+
+  @@map("departments")
+}
+
+enum EmployeeStatus {
+  ACTIVE
+  RESIGNED
+  TERMINATED
+}
+
+model Employee {
+  id           String         @id @default(cuid())
+  userId       String         @unique @map("user_id")
+  employeeCode String         @unique @map("employee_code")
+  departmentId String         @map("department_id")
+  position     String
+  joinDate     DateTime       @map("join_date")
+  status       EmployeeStatus @default(ACTIVE)
+  createdAt    DateTime       @default(now()) @map("created_at")
+  updatedAt    DateTime       @updatedAt @map("updated_at")
+
+  user         User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  department   Department     @relation(fields: [departmentId], references: [id])
+
+  @@map("employees")
+}
+
+// ─── INVENTORY ───────────────────────────────────────────────────────────────
+
+model Category {
+  id          String    @id @default(cuid())
+  name        String    @unique
+  description String?
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  products    Product[]
+
+  @@map("categories")
+}
+
+enum ProductStatus {
+  ACTIVE
+  INACTIVE
+  DISCONTINUED
+}
+
+model Product {
+  id          String        @id @default(cuid())
+  sku         String        @unique
+  name        String
+  description String?
+  categoryId  String        @map("category_id")
+  price       Decimal       @db.Decimal(15, 2)
+  unit        String        // e.g. "pcs", "kg", "liter"
+  status      ProductStatus @default(ACTIVE)
+  createdAt   DateTime      @default(now()) @map("created_at")
+  updatedAt   DateTime      @updatedAt @map("updated_at")
+
+  category    Category      @relation(fields: [categoryId], references: [id])
+  inventory   Inventory?
+  orderItems  OrderItem[]
+
+  @@map("products")
+}
+
+model Inventory {
+  id          String   @id @default(cuid())
+  productId   String   @unique @map("product_id")
+  stock       Int      @default(0)
+  minStock    Int      @default(0) @map("min_stock")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  product     Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@map("inventories")
+}
+
+// ─── ORDERS ──────────────────────────────────────────────────────────────────
+
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  PROCESSING
+  SHIPPED
+  DELIVERED
+  CANCELLED
+}
+
+enum OrderType {
+  PURCHASE  // beli dari supplier
+  SALE      // jual ke customer
+}
+
+model Order {
+  id          String      @id @default(cuid())
+  orderNumber String      @unique @map("order_number")
+  type        OrderType
+  status      OrderStatus @default(PENDING)
+  totalAmount Decimal     @default(0) @db.Decimal(15, 2) @map("total_amount")
+  notes       String?
+  createdBy   String      @map("created_by")
+  createdAt   DateTime    @default(now()) @map("created_at")
+  updatedAt   DateTime    @updatedAt @map("updated_at")
+
+  items       OrderItem[]
+
+  @@map("orders")
+}
+
+model OrderItem {
+  id        String  @id @default(cuid())
+  orderId   String  @map("order_id")
+  productId String  @map("product_id")
+  quantity  Int
+  unitPrice Decimal @db.Decimal(15, 2) @map("unit_price")
+  subtotal  Decimal @db.Decimal(15, 2)
+
+  order     Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product   Product @relation(fields: [productId], references: [id])
+
+  @@map("order_items")
+}
